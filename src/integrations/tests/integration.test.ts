@@ -12,6 +12,7 @@ import type {
   Opportunity,
   ObjectMapping,
 } from '../types';
+import { describe, expect, it } from 'vitest';
 import { SalesforceLarkIntegration, createIntegration } from '../index';
 import { Logger } from '../common';
 
@@ -319,3 +320,12 @@ export async function runIntegrationTests(): Promise<TestSummary> {
 
   return summary;
 }
+
+describe('Salesforce ↔ Lark integration runner', () => {
+  it('executes the bundled integration smoke tests successfully', async () => {
+    const summary = await runIntegrationTests();
+
+    expect(summary.total).toBeGreaterThan(0);
+    expect(summary.failed).toBe(0);
+  });
+});
