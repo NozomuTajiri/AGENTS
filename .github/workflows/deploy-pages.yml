@@ -26,7 +26,7 @@ concurrency:
 jobs:
   generate-data:
     runs-on: ubuntu-latest
-    name: Generate dashboard data
+    name: Generate site data
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,18 +36,15 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install Dependencies
-        run: npm ci
-
-      - name: Generate Dashboard Data
+      - name: Generate Site Data
         env:
           GITHUB_TOKEN: ${{ secrets.GH_PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_PROJECT_NUMBER: ${{ vars.GITHUB_PROJECT_NUMBER || '1' }}
         run: |
-          npx tsx scripts/generate-dashboard-data.ts
+          node scripts/generate-dashboard-data.js
 
-      - name: Upload Dashboard Data
+      - name: Upload Site Data
         uses: actions/upload-artifact@v4
         with:
           name: dashboard-data
@@ -64,7 +61,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download Dashboard Data
+      - name: Download Site Data
         uses: actions/download-artifact@v4
         with:
           name: dashboard-data
@@ -84,10 +81,10 @@ jobs:
 
       - name: Summary
         run: |
-          echo "### 🚀 Dashboard Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "### 🚀 Homepage Deployed" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✓ Dashboard successfully deployed to GitHub Pages" >> $GITHUB_STEP_SUMMARY
+          echo "✓ Homepage successfully deployed to GitHub Pages" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**URL**: ${{ steps.deployment.outputs.page_url }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "_Dashboard data will auto-update every 6 hours_" >> $GITHUB_STEP_SUMMARY
+          echo "_Site data will auto-update every 6 hours_" >> $GITHUB_STEP_SUMMARY
