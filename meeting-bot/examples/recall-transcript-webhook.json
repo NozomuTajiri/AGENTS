@@ -1,0 +1,7 @@
+{
+  "event": "transcript.done",
+  "data": {
+    "bot": { "id": "bot_abc123" },
+    "transcript": { "id": "tr_xyz789" }
+  }
+}
