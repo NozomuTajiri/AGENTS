@@ -96,6 +96,20 @@ n8n から外部公開する場合は ngrok / Cloudflare Tunnel 等で
 4. 会議終了後、Recall.ai から Webhook が飛び transcript が解析される
 5. ログまたは保存先 CRM で結果を確認
 
+## 次の手順（Phase 0 → Phase 4 までのロードマップ）
+
+実際に動かす手順 / 本番化チェックリスト / 拡張アイデアは
+[`docs/next-steps.md`](docs/next-steps.md) にまとめました。
+
+最短でローカル疎通だけ試すには:
+
+```bash
+cd meeting-bot
+npm install
+npx vitest run                 # 6/6 pass
+npx tsx scripts/dryRun.ts      # FakeLLM で A→B→C を疎通実行
+```
+
 ## ライセンス
 
 MIT

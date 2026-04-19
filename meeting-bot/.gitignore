@@ -4,3 +4,5 @@ data/
 .env
 .env.local
 *.log
+
+# package-lock.json は CI 再現性のため追跡する
