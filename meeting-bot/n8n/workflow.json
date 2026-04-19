@@ -1,0 +1,207 @@
+{
+  "name": "Meeting Bot - tl;dv Alternative",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": { "item": [{ "mode": "everyMinute" }] },
+        "triggerOn": "eventCreated",
+        "calendar": { "__rl": true, "value": "primary", "mode": "list" },
+        "options": {}
+      },
+      "id": "calendar-trigger",
+      "name": "Step1 - Calendar: New Event",
+      "type": "n8n-nodes-base.googleCalendarTrigger",
+      "typeVersion": 1,
+      "position": [240, 200]
+    },
+    {
+      "parameters": {
+        "functionCode": "const event = $json;\nconst desc = (event.description || '') + ' ' + (event.location || '') + ' ' + (event.hangoutLink || '');\nconst urlMatch = desc.match(/https?:\\/\\/(?:[a-zA-Z0-9-]+\\.)?(?:zoom\\.us|meet\\.google\\.com|teams\\.microsoft\\.com|teams\\.live\\.com)\\/[^\\s\"'<>]+/);\nif (!urlMatch) {\n  return [];\n}\nreturn [{\n  json: {\n    meeting_url: urlMatch[0],\n    join_at: event.start && event.start.dateTime,\n    customer_name: (event.summary || '').split(/[\\s_\\-]+/)[0] || 'unknown',\n    meeting_purpose: event.summary || 'meeting'\n  }\n}];"
+      },
+      "id": "extract-url",
+      "name": "Step1 - Extract Meeting URL",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [480, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://{{$env.RECALL_REGION || 'us-west-2'}}.recall.ai/api/v1/bot/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"meeting_url\": \"{{$json.meeting_url}}\",\n  \"bot_name\": \"カクシン AI\",\n  \"join_at\": \"{{$json.join_at}}\",\n  \"recording_config\": {\n    \"transcript\": {\n      \"provider\": {\n        \"deepgram_streaming\": {\n          \"model\": \"nova-3\",\n          \"language\": \"multi\",\n          \"punctuate\": true,\n          \"smart_format\": true\n        }\n      }\n    }\n  },\n  \"use_separate_streams_when_available\": true,\n  \"webhooks\": [{\n    \"url\": \"{{$env.N8N_WEBHOOK_URL}}\",\n    \"events\": [\"transcript.done\", \"recording.done\", \"bot.status_change\"]\n  }],\n  \"metadata\": {\n    \"customer_name\": \"{{$json.customer_name}}\",\n    \"meeting_purpose\": \"{{$json.meeting_purpose}}\"\n  }\n}",
+        "options": {}
+      },
+      "id": "schedule-bot",
+      "name": "Step1 - Recall.ai: Schedule Bot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [720, 200]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "recall-transcript",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-receive",
+      "name": "Step2 - Webhook: Receive Transcript",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 600],
+      "webhookId": "recall-transcript"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"ok\": true }"
+      },
+      "id": "respond-202",
+      "name": "Step2 - Respond 202",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [480, 600]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://{{$env.RECALL_REGION || 'us-west-2'}}.recall.ai/api/v1/bot/{{$json.body.data.bot.id}}/transcript/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "fetch-transcript",
+      "name": "Step2 - Fetch Transcript",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [720, 600]
+    },
+    {
+      "parameters": {
+        "functionCode": "const utterances = $json.utterances || [];\nconst transcriptText = utterances.map(u => `${u.speaker || 'speaker'}: ${u.text || (u.words || []).map(w => w.text).join(' ')}`).join('\\n');\nreturn [{\n  json: {\n    transcript_text: transcriptText,\n    speakers: [...new Set(utterances.map(u => u.speaker || 'speaker'))],\n    customer_name: $json.metadata && $json.metadata.customer_name,\n    meeting_purpose: $json.metadata && $json.metadata.meeting_purpose\n  }\n}];"
+      },
+      "id": "build-context",
+      "name": "Step3 - Build Context",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [960, 600]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-3-5-sonnet-latest\",\n  \"max_tokens\": 2048,\n  \"temperature\": 0.1,\n  \"system\": \"あなたは熟練の議事録アナリストです。事実のみを構造化抽出します。\",\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"# 入力\\n顧客: {{$json.customer_name}}\\n目的: {{$json.meeting_purpose}}\\n\\n# 文字起こし\\n```\\n{{$json.transcript_text}}\\n```\\n\\n# タスク\\n発言者一覧 / ペインポイント / 数値情報 / 決定事項 / 未解決事項を Markdown で出力。事実のみ。\"\n  }]\n}",
+        "options": {}
+      },
+      "id": "prompt-a",
+      "name": "Step3 - Prompt A: Facts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1200, 480]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-3-5-sonnet-latest\",\n  \"max_tokens\": 2048,\n  \"temperature\": 0.4,\n  \"system\": \"あなたは『価値主義経営』を提唱するシニアコンサルタントです。\",\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"# 事実\\n{{$json.content[0].text}}\\n\\n# タスク\\n潜在ニーズ仮説3つ / 提供可能な付加価値3つ / リスクを Markdown で出力。\"\n  }]\n}",
+        "options": {}
+      },
+      "id": "prompt-b",
+      "name": "Step3 - Prompt B: Value",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1440, 600]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-3-5-sonnet-latest\",\n  \"max_tokens\": 2048,\n  \"temperature\": 0.3,\n  \"system\": \"提案書ライティングと PMO を兼任する実行型コンサルタントです。\",\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"# 付加価値仮説\\n{{$json.content[0].text}}\\n\\n# タスク\\n提案書目次案(1〜8項目) / 担当別アクションアイテム表 / 顧客フォローメール下書きを Markdown で出力。\"\n  }]\n}",
+        "options": {}
+      },
+      "id": "prompt-c",
+      "name": "Step3 - Prompt C: Next Action",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1680, 720]
+    },
+    {
+      "parameters": {
+        "functionCode": "const date = new Date();\nconst ymd = `${date.getFullYear()}${String(date.getMonth()+1).padStart(2,'0')}${String(date.getDate()).padStart(2,'0')}`;\nconst sanitize = s => (s || 'unknown').replace(/[^A-Za-z0-9一-龯ぁ-んァ-ヶー]+/g, '_');\nreturn [{\n  json: {\n    record_key: `${ymd}_${sanitize($node['Step3 - Build Context'].json.customer_name)}_${sanitize($node['Step3 - Build Context'].json.meeting_purpose)}`,\n    payload: {\n      facts: $node['Step3 - Prompt A: Facts'].json.content[0].text,\n      value: $node['Step3 - Prompt B: Value'].json.content[0].text,\n      next_action: $node['Step3 - Prompt C: Next Action'].json.content[0].text,\n      speakers: $node['Step3 - Build Context'].json.speakers\n    }\n  }\n}];"
+      },
+      "id": "build-record",
+      "name": "Step4 - Build Record",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1920, 720]
+    }
+  ],
+  "connections": {
+    "Step1 - Calendar: New Event": {
+      "main": [[{ "node": "Step1 - Extract Meeting URL", "type": "main", "index": 0 }]]
+    },
+    "Step1 - Extract Meeting URL": {
+      "main": [[{ "node": "Step1 - Recall.ai: Schedule Bot", "type": "main", "index": 0 }]]
+    },
+    "Step2 - Webhook: Receive Transcript": {
+      "main": [[
+        { "node": "Step2 - Respond 202", "type": "main", "index": 0 },
+        { "node": "Step2 - Fetch Transcript", "type": "main", "index": 0 }
+      ]]
+    },
+    "Step2 - Fetch Transcript": {
+      "main": [[{ "node": "Step3 - Build Context", "type": "main", "index": 0 }]]
+    },
+    "Step3 - Build Context": {
+      "main": [[{ "node": "Step3 - Prompt A: Facts", "type": "main", "index": 0 }]]
+    },
+    "Step3 - Prompt A: Facts": {
+      "main": [[{ "node": "Step3 - Prompt B: Value", "type": "main", "index": 0 }]]
+    },
+    "Step3 - Prompt B: Value": {
+      "main": [[{ "node": "Step3 - Prompt C: Next Action", "type": "main", "index": 0 }]]
+    },
+    "Step3 - Prompt C: Next Action": {
+      "main": [[{ "node": "Step4 - Build Record", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {},
+  "active": false
+}
